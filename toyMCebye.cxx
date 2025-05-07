@@ -5,6 +5,8 @@
 #include <TH1D.h>
 #include <TRandom3.h>
 #include <string>
+#include <TH2D.h>
+#include <TH3D.h>
 
 constexpr bool save_tree = false;
 // constexpr double nEv = 6.e5; // for central (0-10%) --> 6e10 collisions
@@ -27,16 +29,26 @@ int main(int const argv, char* const argc[]){ //double const nEv = 6.e10, int co
   }
 
   TFile *fDist = TFile::Open("fOut.root"); // distribution file
-  TFile *fEff = TFile::Open("fo_eff.root"); // efficiency file
+  TFile *fEff = TFile::Open("fo_ef.root"); // efficiency file
   TH3D *hCPtY = static_cast<TH3D*>(fDist->Get("hPtY"));
-  TH2D *hnLaL = static_cast<TH2D*>(fDist->Get("hLantiL"));
+  TH2D *hnLaL = static_cast<TH2D*>(fDist->Get("hLAntiL"));
+  if (!hCPtY || !hnLaL) {
+    std::cout << "No input histos!" << std::endl;
+    return -1;
+  }
   TH2D *hPtY[2];
-  TH1D *hEff[2];
+  TH2D *hEff[2];
   for (int iC{0}; iC < 2; ++iC){
     hCPtY->GetXaxis()->SetRangeUser(iC, iC + 1);
-    hPtY[iC] = static_cast<TH2D*>(hCPtY->Project3D("hPtY"));
+    hPtY[iC] = static_cast<TH2D*>(hCPtY->Project3D("zy"));
     hPtY[iC]->SetName(Form("hPtY_%d", iC));
-    hEff[iC] = static_cast<TH1D*>(fEff->Get(Form("hEff_%d", iC)));
+    hEff[iC] = static_cast<TH2D*>(fEff->Get("hEff2D"));
+    hEff[iC]->SetName(Form("hEff_%d", iC));
+
+    if (!hEff[iC] || !hPtY[iC]) {
+      std::cout << "No input histos (2)!" << std::endl;
+      return -2;
+    }
   }
 
   gRandom->SetSeed(10 * S_MIN);
@@ -82,8 +94,8 @@ int main(int const argv, char* const argc[]){ //double const nEv = 6.e10, int co
 
   for (long int i{0}; i < nEv; ++i){
     if (i%1000000 == 0) std::cout << i << "\n";
-    double k1_a = 0., k1_b = 0;
-    hnLaL->GetRandom2(k1_a, k1_b);
+    double k1[2]{0.};
+    hnLaL->GetRandom2(k1[0], k1[1]);
 
     double q_[2][4]{0.};
 
@@ -93,18 +105,24 @@ int main(int const argv, char* const argc[]){ //double const nEv = 6.e10, int co
       return std::pow(q_[0][c - 1] + sgn * q_[1][c - 1], a);
     };
 
+//    std::cout << k1[0] << "\t" << k1[1] << std::endl;
+
     for (int iC{0}; iC < 2; ++iC) {
-      double pt_rndm = -999., y_rndm = -999.;
-      hPtY[iC]->GetRandom2(pt_rndm, y_rndm);
-      double p = pt_rndm * std::cosh(y_rndm);
-      double pz = std::sqrt(p * p - pt_rndm * pt_rndm);
-      double eta = 0.5 * std::log((p + pz) / (p - pz));
-      if (pt_rndm < pt_lim[0] || pt_rndm > pt_lim[1] || eta < eta_lim[0] || eta > eta_lim[1])
-        continue;
-      double eff_tmp = hEff[iC]->GetBinContent(pt_rndm, eta);
-      if (gRandom->Rndm() < eff_tmp) {
-        for (int i{0}; i < 4; ++i)
-          q_[iC][i] = q_[iC][i] + (1. / std::pow(eff_tmp, i + 1));
+      for (int ik{0}; ik < k1[iC]; ++ik){
+        double pt_rndm = -999., y_rndm = -999.;
+        hPtY[iC]->GetRandom2(pt_rndm, y_rndm);
+        y_rndm += 1.8; // beam rapidity
+        double p = pt_rndm * std::cosh(y_rndm);
+        double pz = std::sqrt(p * p - pt_rndm * pt_rndm);
+        double eta = 0.5 * std::log((p + pz) / (p - pz));
+        if (pt_rndm < pt_lim[0] || pt_rndm > pt_lim[1] || eta < eta_lim[0] || eta > eta_lim[1] || gRandom->Rndm() > brLambda)
+          continue;
+        double eff_tmp = 1.; // hEff[iC]->GetBinContent(hEff[iC]->FindBin(pt_rndm, eta));
+//        std::cout << eff_tmp << std::endl;
+        if (gRandom->Rndm() < eff_tmp) {
+          for (int i{0}; i < 4; ++i)
+            q_[iC][i] = q_[iC][i] + (1. / std::pow(eff_tmp, i + 1));
+        }
       }
     }
 
@@ -209,9 +227,9 @@ int main(int const argv, char* const argc[]){ //double const nEv = 6.e10, int co
   TH1F hb("hb", "hb", 10000, .95, 1.05);
   TH1F hnet("hnet", "hnet", 10000, .95, 1.05);
 
-  TH1F hk2sknet("hk2sknet", ";#kappa_{2}/Skellam;Entries", 10000, .95, 1.05);
-  TH1F hk4k2net("hk4k2net", ";#kappa_{4}/#kappa_{2};Entries", 20000, -300., 300.);
-  TH1F hk3k1net("hk3k1net", ";#kappa_{3}/#kappa_{1};Entries", 20000, -10., 10.);
+  TH1F hk2sknet("hk2sknet", ";#kappa_{2}/Skellam;Entries", 10000, .0, 2.);
+  TH1F hk4k2net("hk4k2net", ";#kappa_{4}/#kappa_{2};Entries", 20000, -20., 20.);
+  TH1F hk3k1net("hk3k1net", ";#kappa_{3}/#kappa_{1};Entries", 20000, 0., 2.);
 
   for (long int i{S_MIN}; i < S_MAX; ++i){
     // std::cout << n1_a[i] << "\n";
